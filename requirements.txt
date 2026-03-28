@@ -1,0 +1,4 @@
+PyQt6>=6.4.0
+faster-whisper>=0.10.0
+notion-client>=2.0.0
+llama-cpp-python>=0.2.0

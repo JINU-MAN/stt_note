@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# PyInstaller build output
+dist/
+build/stt_worker/
+build/llm_worker/
+build/main/
+build/_pyi_cache/
+*.spec.bak
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# App data / logs
+*.log
+
+# Test files
+test_model.py
