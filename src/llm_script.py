@@ -1,5 +1,5 @@
 """
-LLM 요약 서브프로세스 — subprocess.Popen 으로 실행됩니다.
+LLM 요약 서브프로세스 (OpenVINO 버전) — subprocess.Popen 으로 실행됩니다.
 진행 상황과 결과를 JSON 라인으로 stdout 에 출력합니다.
 """
 import argparse
@@ -48,24 +48,38 @@ def _split_chunks(text: str) -> list[str]:
     return [c.strip() for c in chunks if c.strip()]
 
 
-def _generate(llm, prompt: str, max_tokens: int) -> str:
-    result = llm(prompt, max_tokens=max_tokens, stop=["[텍스트]", "[요약]", "[전체 요약]"])
-    return result["choices"][0]["text"].strip()
+def _generate(pipe, prompt: str, max_new_tokens: int) -> str:
+    result = pipe(prompt, max_new_tokens=max_new_tokens, return_full_text=False,
+                  do_sample=False)
+    text = result[0]["generated_text"].strip()
+    # stop tokens 이후 잘라내기
+    for stop in ["[텍스트]", "[요약]", "[전체 요약]"]:
+        if stop in text:
+            text = text[:text.index(stop)].strip()
+    return text
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", required=True, help="GGUF 모델 파일 경로")
-    parser.add_argument("--text-file", required=True, help="요약할 텍스트가 저장된 파일 경로")
+    parser.add_argument("--model-dir", required=True, dest="model_dir",
+                        help="OpenVINO IR 모델 디렉터리 경로")
+    parser.add_argument("--device",    default="CPU")
+    parser.add_argument("--text-file", required=True,
+                        help="요약할 텍스트가 저장된 파일 경로")
     args = parser.parse_args()
 
     with open(args.text_file, encoding="utf-8") as f:
         text = f.read()
 
-    emit({"status": "progress", "pct": 5, "msg": "LLM 모델 로딩 중..."})
+    emit({"status": "progress", "pct": 5,
+          "msg": f"LLM 모델 로딩 중... (장치: {args.device})"})
 
-    from llama_cpp import Llama
-    llm = Llama(model_path=args.model, n_ctx=4096, n_threads=2, verbose=False)
+    from optimum.intel import OVModelForCausalLM
+    from transformers import AutoTokenizer, pipeline
+
+    model = OVModelForCausalLM.from_pretrained(args.model_dir, device=args.device)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
+    pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
     chunks = _split_chunks(text)
     total = len(chunks)
@@ -75,7 +89,7 @@ def main():
         pct = 10 + int((i / total) * 75)
         emit({"status": "progress", "pct": pct,
               "msg": f"구간 요약 중... ({i + 1}/{total})"})
-        summary = _generate(llm, _CHUNK_PROMPT.format(text=chunk), max_tokens=300)
+        summary = _generate(pipe, _CHUNK_PROMPT.format(text=chunk), max_new_tokens=300)
         chunk_summaries.append(summary)
 
     emit({"status": "progress", "pct": 88, "msg": "최종 요약 생성 중..."})
@@ -86,7 +100,8 @@ def main():
         combined = "\n\n".join(
             f"[{i + 1}구간] {s}" for i, s in enumerate(chunk_summaries)
         )
-        final_summary = _generate(llm, _FINAL_PROMPT.format(summaries=combined), max_tokens=500)
+        final_summary = _generate(pipe, _FINAL_PROMPT.format(summaries=combined),
+                                   max_new_tokens=500)
 
     emit({
         "status": "done",

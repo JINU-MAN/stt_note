@@ -10,73 +10,56 @@ MODEL_LABELS = {
     "large-v3": "Large-v3 (최고)",
 }
 
-# CTranslate2 int8 변환 후 model.bin 최소 크기 (실제 크기의 90%)
-_MODEL_MIN_BYTES = {
-    "tiny":    33_000_000,
-    "base":    64_000_000,
-    "small":   215_000_000,
-    "medium":  685_000_000,
-    "large-v3": 1_380_000_000,
+# OpenVINO IR 변환 후 예상 최소 크기 (bin 파일 기준, 실제 크기의 80%)
+_OV_MODEL_MIN_BYTES = {
+    "tiny":     80_000_000,
+    "base":    150_000_000,
+    "small":   500_000_000,
+    "medium": 1_500_000_000,
+    "large-v3": 3_000_000_000,
 }
 
+_OV_CACHE = Path.home() / ".cache" / "stt_note_ov" / "whisper"
 
-def _model_root(model_size: str) -> Path:
-    cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
-    return cache_dir / f"models--Systran--faster-whisper-{model_size}"
+
+def _model_dir(model_size: str) -> Path:
+    return _OV_CACHE / model_size
 
 
 def is_model_downloaded(model_size: str) -> bool:
-    """faster-whisper 모델이 완전히 다운로드됐는지 확인.
-
-    불완전한 다운로드는 False를 반환:
-    - blobs/ 디렉토리에 .incomplete 파일이 존재하는 경우
-    - model.bin 이 없거나 최소 크기 미달인 경우
-    """
-    root = _model_root(model_size)
-    snapshots = root / "snapshots"
-    if not snapshots.exists() or not any(snapshots.iterdir()):
+    """OpenVINO Whisper 모델이 완전히 변환·저장됐는지 확인."""
+    d = _model_dir(model_size)
+    xml = d / "openvino_model.xml"
+    bin_ = d / "openvino_model.bin"
+    if not xml.exists() or not bin_.exists():
         return False
-
-    # .incomplete 파일 확인 (중단된 다운로드 마커)
-    blobs = root / "blobs"
-    if blobs.exists() and any(blobs.glob("*.incomplete")):
-        return False
-
-    # model.bin 크기 확인 (심볼릭 링크 → 실제 파일 따라가기)
-    for snapshot_dir in snapshots.iterdir():
-        model_bin = snapshot_dir / "model.bin"
-        if model_bin.exists():
-            actual_size = model_bin.stat().st_size
-            min_size = _MODEL_MIN_BYTES.get(model_size, 0)
-            return actual_size >= min_size
-
-    return False
+    return bin_.stat().st_size >= _OV_MODEL_MIN_BYTES.get(model_size, 0)
 
 
 def is_model_corrupted(model_size: str) -> bool:
-    """모델 폴더는 있지만 불완전한 다운로드 상태인지 확인."""
-    root = _model_root(model_size)
-    snapshots = root / "snapshots"
-    if not snapshots.exists() or not any(snapshots.iterdir()):
-        return False  # 아예 없는 경우 (corrupted 아님)
-
-    blobs = root / "blobs"
-    if blobs.exists() and any(blobs.glob("*.incomplete")):
+    """디렉터리는 있지만 모델 파일이 불완전한 상태인지 확인."""
+    d = _model_dir(model_size)
+    if not d.exists():
+        return False
+    xml = d / "openvino_model.xml"
+    bin_ = d / "openvino_model.bin"
+    # 디렉터리는 있는데 파일이 없거나 크기 미달
+    if not xml.exists() or not bin_.exists():
         return True
-
-    for snapshot_dir in snapshots.iterdir():
-        model_bin = snapshot_dir / "model.bin"
-        if model_bin.exists():
-            actual_size = model_bin.stat().st_size
-            min_size = _MODEL_MIN_BYTES.get(model_size, 0)
-            return actual_size < min_size
-
-    return False
+    return bin_.stat().st_size < _OV_MODEL_MIN_BYTES.get(model_size, 0)
 
 
-def download_model(model_size: str, device: str = "cpu") -> None:
-    """모델 파일을 HuggingFace hub에서 다운로드한다.
-    WhisperModel을 로드하지 않으므로 QThread에서 안전하게 호출 가능.
-    """
-    from huggingface_hub import snapshot_download
-    snapshot_download(repo_id=f"Systran/faster-whisper-{model_size}")
+def download_model(model_size: str, device: str = "CPU") -> None:
+    """HuggingFace에서 Whisper를 다운로드하고 OpenVINO IR로 변환·저장."""
+    from optimum.intel import OVModelForSpeechSeq2Seq
+    from transformers import AutoProcessor
+
+    hf_id = f"openai/whisper-{model_size}"
+    out_dir = _model_dir(model_size)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    model = OVModelForSpeechSeq2Seq.from_pretrained(hf_id, export=True)
+    model.save_pretrained(str(out_dir))
+
+    processor = AutoProcessor.from_pretrained(hf_id)
+    processor.save_pretrained(str(out_dir))

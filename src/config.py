@@ -44,7 +44,7 @@ class Config:
 
     @property
     def device(self) -> str:
-        return self._data.get("device", "cpu")
+        return self._data.get("device", "CPU")
 
     @device.setter
     def device(self, value: str):
@@ -68,7 +68,7 @@ class Config:
 
     @property
     def llm_model_size(self) -> str:
-        return self._data.get("llm_model_size", "gemma3-1b")
+        return self._data.get("llm_model_size", "qwen2.5-1.5b")
 
     @llm_model_size.setter
     def llm_model_size(self, value: str):

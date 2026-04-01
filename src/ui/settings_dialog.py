@@ -18,9 +18,9 @@ from PyQt6.QtWidgets import (
 )
 
 from src.config import Config
-from src.llm import LLM_MODELS, LLM_MODEL_LABELS, download_llm, is_llm_downloaded, model_path as llm_model_path, _SOURCES as _LLM_SOURCES
+from src.llm import LLM_MODELS, LLM_MODEL_LABELS, download_llm, is_llm_downloaded, model_dir as llm_model_dir, _SOURCES as _LLM_SOURCES
 from src.notion_api import NotionAPI
-from src.stt import MODELS, MODEL_LABELS, download_model, is_model_downloaded, is_model_corrupted, _model_root, _MODEL_MIN_BYTES
+from src.stt import MODELS, MODEL_LABELS, download_model, is_model_downloaded, is_model_corrupted, _model_dir as stt_model_dir, _OV_MODEL_MIN_BYTES
 
 
 # ---------------------------------------------------------------------------
@@ -54,22 +54,23 @@ class DownloadModelWorker(QThread):
         self.device = device
 
     def run(self):
-        expected = _MODEL_MIN_BYTES.get(self.model_size, 0)
-        blobs = _model_root(self.model_size) / "blobs"
+        from pathlib import Path
+        expected = _OV_MODEL_MIN_BYTES.get(self.model_size, 0)
+        model_d = stt_model_dir(self.model_size)
         monitoring = True
 
         def _monitor():
             while monitoring:
-                if blobs.exists():
+                if model_d.exists():
                     size = sum(
-                        f.stat().st_size for f in blobs.iterdir()
-                        if f.is_file() and f.suffix not in (".lock", ".incomplete")
+                        f.stat().st_size for f in model_d.iterdir()
+                        if f.is_file()
                     )
                     if expected > 0 and size > 0:
                         pct = min(int(size / expected * 95), 95)
                         done_mb = size / 1024 / 1024
                         total_mb = expected / 1024 / 1024
-                        self.progress.emit(pct, f"다운로드 중... {done_mb:.0f} / {total_mb:.0f} MB")
+                        self.progress.emit(pct, f"변환·저장 중... {done_mb:.0f} / {total_mb:.0f} MB")
                 time.sleep(1)
 
         threading.Thread(target=_monitor, daemon=True).start()
@@ -93,19 +94,22 @@ class DownloadLLMWorker(QThread):
 
     def run(self):
         from pathlib import Path
-        target = Path(llm_model_path(self.model_size))
+        model_d = Path(llm_model_dir(self.model_size))
         expected = _LLM_SOURCES[self.model_size]["min_bytes"]
         monitoring = True
 
         def _monitor():
             while monitoring:
-                if target.exists():
-                    size = target.stat().st_size
+                if model_d.exists():
+                    size = sum(
+                        f.stat().st_size for f in model_d.iterdir()
+                        if f.is_file()
+                    )
                     if size > 0:
                         pct = min(int(size / expected * 95), 95)
                         done_mb = size / 1024 / 1024
                         total_mb = expected / 1024 / 1024
-                        self.progress.emit(pct, f"다운로드 중... {done_mb:.0f} / {total_mb:.0f} MB")
+                        self.progress.emit(pct, f"변환·저장 중... {done_mb:.0f} / {total_mb:.0f} MB")
                 time.sleep(1)
 
         threading.Thread(target=_monitor, daemon=True).start()
@@ -205,26 +209,28 @@ class SettingsDialog(QDialog):
         layout.addWidget(model_group)
 
         # ── 처리 장치 ─────────────────────────────────────────────────────
-        device_group = QGroupBox("처리 장치")
-        dg_layout = QHBoxLayout(device_group)
+        device_group = QGroupBox("처리 장치 (OpenVINO)")
+        dg_layout = QVBoxLayout(device_group)
 
+        radio_row = QHBoxLayout()
         self._device_btn_group = QButtonGroup(self)
         self.cpu_radio = QRadioButton("CPU")
-        self.gpu_radio = QRadioButton("GPU (CUDA)")
-        self._device_btn_group.addButton(self.cpu_radio)
-        self._device_btn_group.addButton(self.gpu_radio)
-        dg_layout.addWidget(self.cpu_radio)
-        dg_layout.addWidget(self.gpu_radio)
-        dg_layout.addStretch()
+        self.gpu_radio = QRadioButton("GPU (Intel iGPU)")
+        self.npu_radio = QRadioButton("NPU (Core Ultra)")
+        for r in (self.cpu_radio, self.gpu_radio, self.npu_radio):
+            self._device_btn_group.addButton(r)
+            radio_row.addWidget(r)
+        radio_row.addStretch()
+        dg_layout.addLayout(radio_row)
 
-        gpu_note = QLabel("GPU를 선택하려면 CUDA가 설치되어 있어야 합니다.")
-        gpu_note.setStyleSheet("color: #888; font-size: 11px;")
-        dg_layout.addWidget(gpu_note)
+        npu_note = QLabel("NPU는 Intel Core Ultra(Meteor Lake 이상) 탑재 기기에서만 사용 가능합니다.")
+        npu_note.setStyleSheet("color: #888; font-size: 11px;")
+        dg_layout.addWidget(npu_note)
 
         layout.addWidget(device_group)
 
         # ── AI 요약 ──────────────────────────────────────────────────────
-        llm_group = QGroupBox("AI 요약 (llama-cpp-python 필요)")
+        llm_group = QGroupBox("AI 요약 (OpenVINO GenAI)")
         lg_layout = QVBoxLayout(llm_group)
 
         self.llm_enable_check = QCheckBox("전사 완료 후 자동 요약")
@@ -283,14 +289,17 @@ class SettingsDialog(QDialog):
         radio.setChecked(True)
         self._update_model_status(model)
 
-        if self.config.device == "cuda":
+        device = self.config.device.upper()
+        if device == "GPU":
             self.gpu_radio.setChecked(True)
+        elif device == "NPU":
+            self.npu_radio.setChecked(True)
         else:
             self.cpu_radio.setChecked(True)
 
         self.llm_enable_check.setChecked(self.config.llm_summarize)
         llm_model = self.config.llm_model_size
-        llm_radio = self._llm_radios.get(llm_model) or self._llm_radios["gemma3-1b"]
+        llm_radio = self._llm_radios.get(llm_model) or self._llm_radios["qwen2.5-1.5b"]
         llm_radio.setChecked(True)
         self._update_llm_status(llm_model)
         self._on_llm_toggled(self.config.llm_summarize)
@@ -381,9 +390,16 @@ class SettingsDialog(QDialog):
             self.conn_lbl.setText(f"❌ 연결 실패: {message}")
             self.conn_lbl.setStyleSheet("color: #dc2626;")
 
+    def _selected_device(self) -> str:
+        if self.gpu_radio.isChecked():
+            return "GPU"
+        if self.npu_radio.isChecked():
+            return "NPU"
+        return "CPU"
+
     def _download_model(self):
         model_id = self._selected_model()
-        device = "cuda" if self.gpu_radio.isChecked() else "cpu"
+        device = self._selected_device()
 
         self.dl_btn.setEnabled(False)
         self.dl_btn.setText("다운로드 중...")
@@ -450,7 +466,7 @@ class SettingsDialog(QDialog):
         self.config.notion_enabled = notion_on
         self.config.notion_token = self.token_input.text().strip()
         self.config.model_size = self._selected_model()
-        self.config.device = "cuda" if self.gpu_radio.isChecked() else "cpu"
+        self.config.device = self._selected_device()
         self.config.llm_summarize = self.llm_enable_check.isChecked()
         self.config.llm_model_size = self._selected_llm_model()
         self.config.save()

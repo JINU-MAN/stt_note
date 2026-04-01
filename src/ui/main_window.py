@@ -29,9 +29,9 @@ from PyQt6.QtWidgets import (
 
 from src.config import Config
 from src.formatter import segments_to_notion_blocks, segments_to_text, summary_to_notion_blocks
-from src.llm import is_llm_downloaded, model_path as llm_model_path
+from src.llm import is_llm_downloaded, model_dir as llm_model_dir
 from src.notion_api import NotionAPI
-from src.stt import is_model_downloaded, is_model_corrupted
+from src.stt import is_model_downloaded, is_model_corrupted, _model_dir as stt_model_dir
 
 
 def _worker_cmd(name: str) -> list[str]:
@@ -89,9 +89,9 @@ class ProcessWorker(QThread):
             # ── 1. STT: 별도 Python 인터프리터로 실행 ───────────────────
             proc = subprocess.Popen(
                 _worker_cmd("stt_script") + [
-                    "--audio",  self.audio_path,
-                    "--model",  self.config.model_size,
-                    "--device", self.config.device,
+                    "--audio",     self.audio_path,
+                    "--model-dir", str(stt_model_dir(self.config.model_size)),
+                    "--device",    self.config.device,
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -222,11 +222,10 @@ class SummarizeWorker(QThread):
                 f.write(self.full_text)
                 tmp_path = f.name
 
-            mpath = llm_model_path(self.config.llm_model_size)
-
             proc = subprocess.Popen(
                 _worker_cmd("llm_script") + [
-                    "--model", mpath,
+                    "--model-dir", llm_model_dir(self.config.llm_model_size),
+                    "--device",    self.config.device,
                     "--text-file", tmp_path,
                 ],
                 stdout=subprocess.PIPE,
