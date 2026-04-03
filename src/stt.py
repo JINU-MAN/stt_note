@@ -49,8 +49,19 @@ def is_model_corrupted(model_size: str) -> bool:
     return bin_.stat().st_size < _OV_MODEL_MIN_BYTES.get(model_size, 0)
 
 
+def _clean_model(model_size: str) -> None:
+    """손상된 OpenVINO 모델 디렉터리를 삭제한다."""
+    import shutil
+    d = _model_dir(model_size)
+    if d.exists():
+        shutil.rmtree(d)
+
+
 def download_model(model_size: str, device: str = "CPU") -> None:
-    """HuggingFace에서 Whisper를 다운로드하고 OpenVINO IR로 변환·저장."""
+    """손상된 캐시가 있으면 먼저 삭제 후 HuggingFace에서 다운로드·변환·저장."""
+    if is_model_corrupted(model_size):
+        _clean_model(model_size)
+
     from optimum.intel import OVModelForSpeechSeq2Seq
     from transformers import AutoProcessor
 

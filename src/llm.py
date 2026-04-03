@@ -44,8 +44,19 @@ def is_llm_downloaded(model_size: str) -> bool:
     return bin_.stat().st_size >= _SOURCES[model_size]["min_bytes"]
 
 
+def _clean_llm(model_size: str) -> None:
+    """손상된 LLM 모델 디렉터리를 삭제한다."""
+    import shutil
+    d = Path(model_dir(model_size))
+    if d.exists():
+        shutil.rmtree(d)
+
+
 def download_llm(model_size: str) -> None:
-    """HuggingFace에서 LLM을 다운로드하고 OpenVINO IR로 변환·저장."""
+    """손상된 캐시가 있으면 먼저 삭제 후 HuggingFace에서 다운로드·변환·저장."""
+    if not is_llm_downloaded(model_size):
+        _clean_llm(model_size)
+
     from optimum.intel import OVModelForCausalLM
     from transformers import AutoTokenizer
 
