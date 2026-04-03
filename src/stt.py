@@ -70,7 +70,12 @@ def download_model(model_size: str, device: str = "CPU") -> None:
     out_dir = _model_dir(model_size)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    model = OVModelForSpeechSeq2Seq.from_pretrained(hf_id, export=True)
+    model = OVModelForSpeechSeq2Seq.from_pretrained(
+        hf_id,
+        export=True,
+        stateful=False,   # stateful export 비활성화 (변환 실패 방지)
+        load_in_8bit=False,
+    )
     model.save_pretrained(str(out_dir))
 
     processor = AutoProcessor.from_pretrained(hf_id)
