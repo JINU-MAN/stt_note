@@ -19,9 +19,9 @@ from PyQt6.QtWidgets import (
 )
 
 from src.config import Config
-from src.llm import LLM_MODELS, LLM_MODEL_LABELS, download_llm, is_llm_downloaded, model_path as llm_model_path, _SOURCES as _LLM_SOURCES
+from src.llm import LLM_MODELS, LLM_MODEL_LABELS, download_llm, is_llm_downloaded, model_path as llm_model_path, _SOURCES as _LLM_SOURCES, _clean_llm
 from src.notion_api import NotionAPI
-from src.stt import MODELS, MODEL_LABELS, download_model, is_model_downloaded, is_model_corrupted, _model_root, _MODEL_MIN_BYTES
+from src.stt import MODELS, MODEL_LABELS, download_model, is_model_downloaded, is_model_corrupted, _model_root, _MODEL_MIN_BYTES, _clean_model
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,10 @@ class DownloadModelWorker(QThread):
         threading.Thread(target=_monitor, daemon=True).start()
         try:
             download_model(self.model_size, self.device)
-            self.finished.emit()
+            if is_model_downloaded(self.model_size):
+                self.finished.emit()
+            else:
+                self.error.emit("다운로드가 완료됐지만 모델 파일 검증 실패.\n재다운로드를 시도해 주세요.")
         except Exception as exc:
             self.error.emit(str(exc))
         finally:
@@ -112,7 +115,10 @@ class DownloadLLMWorker(QThread):
         threading.Thread(target=_monitor, daemon=True).start()
         try:
             download_llm(self.model_size)
-            self.finished.emit()
+            if is_llm_downloaded(self.model_size):
+                self.finished.emit()
+            else:
+                self.error.emit("다운로드가 완료됐지만 모델 파일 검증 실패.\n재다운로드를 시도해 주세요.")
         except Exception as exc:
             self.error.emit(str(exc))
         finally:
@@ -198,8 +204,12 @@ class SettingsDialog(QDialog):
         self.model_status_lbl = QLabel("")
         self.dl_btn = QPushButton("⬇  다운로드")
         self.dl_btn.clicked.connect(self._download_model)
+        self.del_model_btn = QPushButton("🗑  삭제")
+        self.del_model_btn.clicked.connect(self._delete_model)
+        self.del_model_btn.setEnabled(False)
         status_row.addWidget(self.model_status_lbl)
         status_row.addStretch()
+        status_row.addWidget(self.del_model_btn)
         status_row.addWidget(self.dl_btn)
         mg_layout.addLayout(status_row)
 
@@ -256,8 +266,12 @@ class SettingsDialog(QDialog):
         self.llm_status_lbl = QLabel("")
         self.llm_dl_btn = QPushButton("⬇  다운로드")
         self.llm_dl_btn.clicked.connect(self._download_llm)
+        self.del_llm_btn = QPushButton("🗑  삭제")
+        self.del_llm_btn.clicked.connect(self._delete_llm)
+        self.del_llm_btn.setEnabled(False)
         llm_status_row.addWidget(self.llm_status_lbl)
         llm_status_row.addStretch()
+        llm_status_row.addWidget(self.del_llm_btn)
         llm_status_row.addWidget(self.llm_dl_btn)
         lg_layout.addLayout(llm_status_row)
 
@@ -336,7 +350,8 @@ class SettingsDialog(QDialog):
         self._update_llm_status(model_id)
 
     def _update_llm_status(self, model_id: str):
-        if is_llm_downloaded(model_id):
+        downloaded = is_llm_downloaded(model_id)
+        if downloaded:
             self.llm_status_lbl.setText("✅ 다운로드됨")
             self.llm_status_lbl.setStyleSheet("color: #16a34a;")
             self.llm_dl_btn.setEnabled(False)
@@ -346,17 +361,20 @@ class SettingsDialog(QDialog):
             self.llm_status_lbl.setStyleSheet("color: #dc2626;")
             self.llm_dl_btn.setEnabled(True)
             self.llm_dl_btn.setText("⬇  다운로드")
+        self.del_llm_btn.setEnabled(downloaded)
 
     def _on_model_changed(self, model_id: str):
         self._update_model_status(model_id)
 
     def _update_model_status(self, model_id: str):
-        if is_model_downloaded(model_id):
+        downloaded = is_model_downloaded(model_id)
+        corrupted = is_model_corrupted(model_id)
+        if downloaded:
             self.model_status_lbl.setText("✅ 다운로드됨")
             self.model_status_lbl.setStyleSheet("color: #16a34a;")
             self.dl_btn.setEnabled(False)
             self.dl_btn.setText("✅ 완료")
-        elif is_model_corrupted(model_id):
+        elif corrupted:
             self.model_status_lbl.setText("⚠️ 다운로드 중단됨 — 재다운로드 필요")
             self.model_status_lbl.setStyleSheet("color: #b45309;")
             self.dl_btn.setEnabled(True)
@@ -366,10 +384,33 @@ class SettingsDialog(QDialog):
             self.model_status_lbl.setStyleSheet("color: #dc2626;")
             self.dl_btn.setEnabled(True)
             self.dl_btn.setText("⬇  다운로드")
+        self.del_model_btn.setEnabled(downloaded or corrupted)
 
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
+
+    def _delete_model(self):
+        model_id = self._selected_model()
+        reply = QMessageBox.question(
+            self, "모델 삭제",
+            f"Whisper {model_id} 모델을 삭제할까요?\n(재사용하려면 다시 다운로드해야 합니다)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            _clean_model(model_id)
+            self._update_model_status(model_id)
+
+    def _delete_llm(self):
+        model_id = self._selected_llm_model()
+        reply = QMessageBox.question(
+            self, "모델 삭제",
+            f"{LLM_MODEL_LABELS.get(model_id, model_id)} 모델을 삭제할까요?\n(재사용하려면 다시 다운로드해야 합니다)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            _clean_llm(model_id)
+            self._update_llm_status(model_id)
 
     def _test_connection(self):
         token = self.token_input.text().strip()
