@@ -73,8 +73,9 @@ def download_model(model_size: str, device: str = "CPU") -> None:
     model = OVModelForSpeechSeq2Seq.from_pretrained(
         hf_id,
         export=True,
-        stateful=False,   # stateful export 비활성화 (변환 실패 방지)
-        load_in_8bit=False,
+        stateful=False,
+        compile=False,                          # export 시 컴파일 건너뜀 (실행 시점에 컴파일)
+        model_kwargs={"attn_implementation": "eager"},  # SDPA 대신 표준 attention 사용
     )
     model.save_pretrained(str(out_dir))
 
