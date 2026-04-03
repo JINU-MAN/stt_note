@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QRadioButton,
     QVBoxLayout,
@@ -206,6 +207,12 @@ class SettingsDialog(QDialog):
         status_row.addWidget(self.dl_btn)
         mg_layout.addLayout(status_row)
 
+        self.model_dl_bar = QProgressBar()
+        self.model_dl_bar.setRange(0, 100)
+        self.model_dl_bar.setTextVisible(True)
+        self.model_dl_bar.setVisible(False)
+        mg_layout.addWidget(self.model_dl_bar)
+
         layout.addWidget(model_group)
 
         # ── 처리 장치 ─────────────────────────────────────────────────────
@@ -259,6 +266,12 @@ class SettingsDialog(QDialog):
         llm_status_row.addStretch()
         llm_status_row.addWidget(self.llm_dl_btn)
         lg_layout.addLayout(llm_status_row)
+
+        self.llm_dl_bar = QProgressBar()
+        self.llm_dl_bar.setRange(0, 100)
+        self.llm_dl_bar.setTextVisible(True)
+        self.llm_dl_bar.setVisible(False)
+        lg_layout.addWidget(self.llm_dl_bar)
 
         layout.addWidget(llm_group)
 
@@ -413,15 +426,19 @@ class SettingsDialog(QDialog):
         self._dl_worker.start()
 
     def _on_model_dl_progress(self, pct: int, msg: str):
-        self.model_status_lbl.setText(f"⏳ {msg}")
+        self.model_dl_bar.setVisible(True)
+        self.model_dl_bar.setValue(pct)
+        self.model_dl_bar.setFormat(f"{msg}  ({pct}%)")
+        self.model_status_lbl.setText("⏳ 변환·저장 중...")
         self.model_status_lbl.setStyleSheet("color: #92400e;")
-        self.dl_btn.setText(f"{pct}%")
 
     def _on_download_done(self, model_id: str):
+        self.model_dl_bar.setVisible(False)
         self._update_model_status(model_id)
-        QMessageBox.information(self, "완료", f"Whisper {model_id} 모델 다운로드 완료!")
+        QMessageBox.information(self, "완료", f"Whisper {model_id} 모델 준비 완료!")
 
     def _on_download_error(self, msg: str):
+        self.model_dl_bar.setVisible(False)
         self.dl_btn.setEnabled(True)
         self.dl_btn.setText("⬇  다운로드")
         self.model_status_lbl.setText("❌ 다운로드 실패")
@@ -442,15 +459,19 @@ class SettingsDialog(QDialog):
         self._dl_llm_worker.start()
 
     def _on_llm_dl_progress(self, pct: int, msg: str):
-        self.llm_status_lbl.setText(f"⏳ {msg}")
+        self.llm_dl_bar.setVisible(True)
+        self.llm_dl_bar.setValue(pct)
+        self.llm_dl_bar.setFormat(f"{msg}  ({pct}%)")
+        self.llm_status_lbl.setText("⏳ 변환·저장 중...")
         self.llm_status_lbl.setStyleSheet("color: #92400e;")
-        self.llm_dl_btn.setText(f"{pct}%")
 
     def _on_llm_download_done(self, model_id: str):
+        self.llm_dl_bar.setVisible(False)
         self._update_llm_status(model_id)
-        QMessageBox.information(self, "완료", f"{LLM_MODEL_LABELS.get(model_id, model_id)} 다운로드 완료!")
+        QMessageBox.information(self, "완료", f"{LLM_MODEL_LABELS.get(model_id, model_id)} 준비 완료!")
 
     def _on_llm_download_error(self, msg: str):
+        self.llm_dl_bar.setVisible(False)
         self.llm_dl_btn.setEnabled(True)
         self.llm_dl_btn.setText("⬇  다운로드")
         self.llm_status_lbl.setText("❌ 다운로드 실패")
