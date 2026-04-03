@@ -36,7 +36,18 @@ def is_llm_downloaded(model_size: str) -> bool:
     return p.stat().st_size >= _SOURCES[model_size]["min_bytes"]
 
 
+def _clean_llm(model_size: str) -> None:
+    """손상된 LLM 모델 파일을 삭제한다."""
+    import os
+    p = Path(model_path(model_size))
+    if p.exists():
+        os.remove(p)
+
+
 def download_llm(model_size: str) -> None:
+    """손상된 파일이 있으면 먼저 삭제 후 새로 다운로드."""
+    if not is_llm_downloaded(model_size):
+        _clean_llm(model_size)
     from huggingface_hub import hf_hub_download
     src = _SOURCES[model_size]
     _model_dir().mkdir(parents=True, exist_ok=True)

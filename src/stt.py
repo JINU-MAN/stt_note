@@ -74,9 +74,17 @@ def is_model_corrupted(model_size: str) -> bool:
     return False
 
 
+def _clean_model(model_size: str) -> None:
+    """손상된 모델 캐시를 삭제한다."""
+    import shutil
+    root = _model_root(model_size)
+    if root.exists():
+        shutil.rmtree(root)
+
+
 def download_model(model_size: str, device: str = "cpu") -> None:
-    """모델 파일을 HuggingFace hub에서 다운로드한다.
-    WhisperModel을 로드하지 않으므로 QThread에서 안전하게 호출 가능.
-    """
+    """손상된 캐시가 있으면 먼저 삭제 후 HuggingFace hub에서 새로 다운로드."""
+    if is_model_corrupted(model_size):
+        _clean_model(model_size)
     from huggingface_hub import snapshot_download
     snapshot_download(repo_id=f"Systran/faster-whisper-{model_size}")
