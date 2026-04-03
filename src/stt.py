@@ -10,13 +10,14 @@ MODEL_LABELS = {
     "large-v3": "Large-v3 (최고)",
 }
 
-# OpenVINO IR 변환 후 예상 최소 크기 (bin 파일 기준, 실제 크기의 80%)
+# OpenVINO IR 변환 후 예상 크기 (float32 기준, 실측값 기반)
+# medium 실측 ~2.9GB → 다른 모델도 비례 산정
 _OV_MODEL_MIN_BYTES = {
-    "tiny":     80_000_000,
-    "base":    150_000_000,
-    "small":   500_000_000,
-    "medium": 1_500_000_000,
-    "large-v3": 3_000_000_000,
+    "tiny":       390_000_000,
+    "base":       760_000_000,
+    "small":    1_960_000_000,
+    "medium":   2_900_000_000,
+    "large-v3": 5_800_000_000,
 }
 
 _OV_CACHE = Path.home() / ".cache" / "stt_note_ov" / "whisper"
